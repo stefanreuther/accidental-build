@@ -266,6 +266,46 @@ sub rule_get_link_inputs {
     @result;
 }
 
+# Make an auto-rebuild rule for a directory.
+#   rule_rebuild_directory($dir)
+# If the content of the directory changes, the directory is deleted (rm -rf) and rebuilt.
+# This is normally not done because building directory content can be expensive (e.g.
+# compilation of hundreds of object files); only individual files are removed if their
+# rule changes. However, auto-rebuild makes sense for a "make dist" rule which populates
+# a directory by copying from previously-built stuff; that will typically be much cheaper.
+sub rule_rebuild_directory {
+    # FIXME: do we need to work recursive?
+    my $dir = normalize_filename(shift);
+    my $mark = "$dir/.mark";
+    if (!$rules{$mark}{dir}) {
+        die "No rule for directory '$dir' present\n"
+    }
+
+    # Gather all children. Those depend on our .mark file.
+    my @children;
+    foreach my $k (sort keys %rules) {
+        if (grep {$_ eq $mark} @{$rules{$k}{in}}) {
+            push @children, $k;
+        }
+    }
+
+    # Generate hash rule
+    my $child_hash = md5_hex(join("\n", sort @children));
+    my $name_hash = md5_hex($mark);
+    my $n1 = substr($name_hash, 0, 2);
+    my $n2 = substr($name_hash, 2);
+    my $hash_file = "$V{TMP}/.hash/$n1/${n2}_${child_hash}";
+    my $rm = add_variable('RM', 'rm -f');
+    generate($hash_file, [],
+             "\@$rm $V{TMP}/.hash/$n1/${n2}_*",
+             "\@$rm -r $dir",
+             "\@touch $hash_file");
+    push_unique($rules{$mark}{in}, $hash_file);
+    rule_set_priority($hash_file, -100);
+    rule_add_comment($hash_file, "Rule change marker for $dir");
+}
+
+
 sub _rule_get {
     my $rule = normalize_filename(shift);
     $rules{$rule} or die "Rule '$rule' does not exist\n";
@@ -640,7 +680,7 @@ sub load_file {
         push_unique(\@input_files, $mf);
 
         # Eval. Use eval, not do, because that evaluates the code in our scope.
-        print STDERR "\tExecuting $mf...\n";
+        print "\tExecuting $mf...\n";
         eval $code;
         die "Sub-Makefile $mf failed: $@"
             if $@;

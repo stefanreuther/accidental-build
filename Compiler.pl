@@ -99,9 +99,10 @@ sub compile_executable {
 
     generate('all', $out);
 
-    if ($out ne $exe) {
-        generate($exe, $out);
-        rule_set_phony($exe);
+    my $norm_exe = normalize_filename($exe);
+    if ($out ne $norm_exe) {
+        generate($norm_exe, $out);
+        rule_set_phony($norm_exe);
     }
 
     $out;
