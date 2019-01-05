@@ -105,6 +105,17 @@ sub generate {
     my @out = map {normalize_filename($_)} to_list(shift);
     my @in  = map {normalize_filename($_)} to_list(shift);
 
+    # Variable expansion
+    my @code = @_;
+    foreach (@code) {
+        s{\$(?:\((.*?)\)|(.))}{
+            $+ eq '$' ? '$' :
+            $+ eq '@' ? (@out ? $out[0] : '') :
+            $+ eq '<' ? (@in  ? $in[0]  : '') :
+            get_variable($+)
+        }eg;
+    }
+
     # Check for existing rule and find priority along the way
     my $rule;
     my $pri = 0;
@@ -128,14 +139,14 @@ sub generate {
     if (defined $rule) {
         push_unique($rule->{out}, @out);
         push_unique($rule->{in}, @in);
-        push @{$rule->{code}}, @_;
+        push @{$rule->{code}}, @code;
         if ($rule->{dir}) {
             die "Rule type conflict.\n".
                 "Requested files: ".join(' ', @out)."\n".
                 "Rule already describes a directory.\n";
         }
     } else {
-        $rule = { in => [@in], out => [@out], code => [@_], dir => 0, pri => $pri };
+        $rule = { in => [@in], out => [@out], code => [@code], dir => 0, pri => $pri };
         foreach (@out) {
             $rules{$_} = $rule;
         }
