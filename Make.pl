@@ -92,6 +92,7 @@ sub generate_directory {
             generate_directory($p);
         }
     }
+    $dir;
 }
 
 # Generate files.
@@ -160,6 +161,8 @@ sub generate {
             generate_directory($dir);
         }
     }
+
+    $out[0];
 }
 
 sub generate_unique {
@@ -189,6 +192,8 @@ sub generate_unique {
         generate([@out], [@in], @_);
         return 1;
     }
+
+    $out[0];
 }
 
 sub generate_copy {
@@ -670,7 +675,8 @@ sub load_directory {
             $V{$_} .= "/$dir";
         }
 
-        load_file("$dir/Make.pl");
+        # Load file. IN has been updated at this place.
+        load_file("$V{IN}/Rules.pl");
 
         # Restore directory variables
         foreach (@dir_vars) {
