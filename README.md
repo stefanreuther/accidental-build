@@ -15,9 +15,7 @@ Key features:
 
 * description language is Perl, so no need to learn new whacky syntax
 
-* generates very efficient, non-recursive Makefile: you can disable
-  Make's builtin rules (GNU make: `-r`) to reduce the number of files
-  it looks at (one of the advantages claimed by ninja)
+* generates very efficient, non-recursive Makefile
 
 
 
@@ -56,17 +54,17 @@ could use this `Rules.pl`:
     # Compile source code into object code; gather object files in @o
     my @o;
     foreach (qw(one two three four five six seven)) {
-        my $in = "$V{IN}/$_.c";
-        my $out = "$V{TMP}/$_.o";
-        generate($out, $in, "gcc -c $in -o $out");
-        push @o, $out;
+        push @o, generate("$V{TMP}/$_.o", "$V{IN}/$_.c", 'gcc -c $< -o $@');
     }
 
     # Link everything into a program
-    generate("$V{OUT}/prog", "gcc -o $V{OUT}/prog ".join(' ', @o));
+    generate("$V{OUT}/prog", 'gcc -o $@ '.join(' ', @o));
 
     # Create makefile
     output_makefile();
+
+This program also demonstrates the use of `$<` and `$@` to interpolate
+the name of input and output files into a command line.
 
 
 ### Configuration
@@ -78,6 +76,7 @@ command line:
     my $src = "$V{IN}/prog.c";
     my $cxx = add_variable(CXX => 'gcc');
     generate($prog, $src, "$cxx -o $prog $src");
+    # or: generate($prog, $src, '$(CXX) -o $@ $<');
     output_makefile();
 
 This will allow users to accept a command line such as
@@ -98,12 +97,34 @@ set using a parameter such as `WITH_FOO=1`, or more conveniently,
 
 The generated Makefile will *not* accept variable assignments. Dealing
 with variables would make matters pretty complex, and in particular
-make detecting rule changes very hard.
+make detecting rule changes very hard. All replacements happen at
+Makefile generation time.
+
+
+### What the Makefile does
+
+By default, the Makefile automatically has a `make clean` rule to
+remove all generated files except those explicitly marked precious.
+
+The Makefile automatically regenerates itself if any of the files
+involved in its creation changes. If the command used to create a file
+changes, that file is rebuilt.
+
+You need not manually create subdirectories, this happens
+automatically.
+
+The Makefile will have a `make all` rule. You need to add dependencies
+to that rule.
+
+If a rule generates a `.d` file, that file will automatically be
+included into the Makefile using the `-include` command. By having
+your compiler create these files, we get automatic header file
+dependencies (for gcc, use `-MMD -MP`).
 
 
 ### More
 
-Check the documentation within `Make.pl` for more information.
+Check the documentation within `Make.pl` for more information, aka: RTFS.
 
 There also are some ready-made subroutines for autoconf-style
 configuration and compilation. Use those by calling a command such as
@@ -147,3 +168,41 @@ directories, rebuild on rule change...
 
     $rule{clean} = { code=>[map {"rm -f $_"} sort keys %rule] }
 
+Compiling C++ code is just a matter of different, simple rules. And
+since this is Perl, we can use all Perl control structures and
+functions.
+
+This, plus some chrome, is essentially everything `Make.pl` does.
+
+
+
+Efficiency
+-----------
+
+The generated Makefile does not rely on any built-in magic (i.e.
+built-in pattern rules) of the Make program. You can disable Make's
+builtin rules (GNU make: `-r`) to reduce the number of files it looks
+at (this is an advantage ninja claims to have over Make).
+
+The above "asset" project currently clocks in at 365 output files and
+2465 temporary files. After a build, `make` needs 50 ms to determine
+that there's nothing more to be done, `make -r` needs just 17 ms on my
+machine. For a C++ project with ~900 source files we're at 250 ms vs.
+50 ms.
+
+
+
+Portability
+------------
+
+The Makefile will use no variables, functions or special commands
+(e.g. conditionals), just plain simple rules. The Makefile will not
+use pattern rules (`.c.o:` or `%.o: %.c`).
+
+If a rule generates a `.d` file, that file will automatically be
+included into the Makefile using the `-include` command. These are
+dependency files.
+
+The Makefile will have a rule to re-create itself; this will obviously
+only work if the Make utility supports the feature of re-creating and
+re-loading a Makefile.

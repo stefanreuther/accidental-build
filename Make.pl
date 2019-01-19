@@ -73,7 +73,7 @@ load_file("$V{IN}/$V{INFILE}");
 # Makes a rule to create the directory $x.
 # Parents will also be created.
 sub generate_directory {
-    my $dir = shift;
+    my $dir = normalize_filename(shift);
     if (exists($rules{$dir})) {
         if (!$rules{$dir}{dir}) {
             die "Rule type conflict.\n".
@@ -96,12 +96,21 @@ sub generate_directory {
 }
 
 # Generate files.
-#    generate($out, $in, $cmds)
+#    generate($out, $in, @cmds)
 # This is the main function to generate a Makefile rule.
 # $out and $in are either strings (single file) or list references (multiple files).
 # This will generate a rule that creates $out from $in using the given commands $cmds.
+#
 # If a rule with the same outputs already exists, it is extended: additional inputs added,
-# additional commands added.
+# additional commands added. For example, `generate("all", X)` adds X to the `make all`
+# target; `generate("clean", [], "rm X")` adds a command to `make clean`.
+#
+# Variables will be expanded in the commands. Syntax is similar to Makefiles, that is,
+# `$X` for single-character names, `$(XX)` for longer names. Variables added with
+# `add_variable()`, `set_variable()` are recognized in addition to
+#    $$ - dollar sign
+#    $@ - first output
+#    $< - first input
 sub generate {
     my @out = map {normalize_filename($_)} to_list(shift);
     my @in  = map {normalize_filename($_)} to_list(shift);
@@ -165,6 +174,22 @@ sub generate {
     $out[0];
 }
 
+# Generate unique rule.
+#    generate_unique($out, $in, @cmds)
+# This is the same as generate(), but will not extend an existing rule.
+#
+# Success cases: generate_unique() returns 1 if...
+# - the rule does not yet exist, it is created.
+# - the rule exists and has identical content
+#
+# Failure case: generate_unique() returns 0 if...
+# - the rule already exists and has different content
+#
+# Use this if you wish to exercise some control over the created file names,
+# but are ready to take a plan B if there is a file name conflict.
+# For example, a `foo.cpp` file will typically be compiled into `foo.o`,
+# but the output file will have to be renamed if the C++ file is compiled
+# twice with different options.
 sub generate_unique {
     my @out = map {normalize_filename($_)} to_list(shift);
     my @in  = map {normalize_filename($_)} to_list(shift);
@@ -194,6 +219,17 @@ sub generate_unique {
     }
 }
 
+# Generate anonymous rule.
+#    generate_anonymous($out_ext, $in, @cmds)
+# This is the same as generate(), but you do not specify a target file name,
+# just an extension (".o"). Use this function for temporary files, where you do not
+# care about the actual file name.
+#
+# You need to use `$@` to refer to the output file in the commands.
+#
+# If an identical rule already exists, it is re-used.
+#
+# This function returns the name of the created file.
 sub generate_anonymous {
     my $out_ext = shift;
     my @in      = to_list(shift);
@@ -208,6 +244,9 @@ sub generate_anonymous {
     $out;
 }
 
+# Copy a file.
+#    generate_copy($out, $in)
+# Canned rule for just copying a file around.
 sub generate_copy {
     my ($out, $in) = @_;
     my $cp = add_variable('CP', 'cp');
@@ -224,22 +263,34 @@ sub rule_set_priority {
 
 # Add comment to a rule.
 #    rule_add_comment($rule, $text...)
+# The comment will be output to the Makefile just before the rule.
+# You can add multiple comments, each creating one line.
 sub rule_add_comment {
     my $rule = shift;
     push @{_rule_get($rule)->{comment}}, @_;
 }
 
+# Add information to a rule.
+#    rule_add_info($rule, $info)
+# The rule information will be printed when the rule is executed.
+# For example, `rule_add_info("foo.o", "Compiling foo.c");`
 sub rule_add_info {
     my ($rule, $info) = @_;
     _rule_get($rule)->{info} = $info;
 }
 
+# Make rules phony.
+#    rule_set_phony(@rules...)
+# Generates a .PHONY target.
 sub rule_set_phony {
     foreach (@_) {
         _rule_get($_)->{phony} = 1;
     }
 }
 
+# Make files precious.
+#    rule_set_precious(@rules...)
+# Precious files are not deleted by `make clean`.
 sub rule_set_precious {
     foreach (@_) {
         _rule_get($_)->{precious} = 1;
@@ -295,7 +346,7 @@ sub rule_get_link_inputs {
 }
 
 # Make an auto-rebuild rule for a directory.
-#   rule_rebuild_directory($dir)
+#    rule_rebuild_directory($dir)
 # If the content of the directory changes, the directory is deleted (rm -rf) and rebuilt.
 # This is normally not done because building directory content can be expensive (e.g.
 # compilation of hundreds of object files); only individual files are removed if their
@@ -351,9 +402,9 @@ sub generate_rebuild_rule {
     my $mf = normalize_filename("$V{OUT}/$V{OUTFILE}");
     add_variable('PERL', 'perl');
     generate($mf, [@input_files, $0],
-             join(' ', 
+             join(' ',
                   "$V{PERL} $0",
-                  map {"$_=\"$user_vars{$_}\""} sort keys %user_vars)); # FIXME: quoting
+                  map {$_.'='.quotemeta($user_vars{$_})} sort keys %user_vars));
     rule_add_comment($mf, 'Automatically regenerate build file');
     rule_add_info($mf, "Rebuilding $mf");
     rule_set_precious($mf);
