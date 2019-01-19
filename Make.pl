@@ -192,8 +192,20 @@ sub generate_unique {
         generate([@out], [@in], @_);
         return 1;
     }
+}
 
-    $out[0];
+sub generate_anonymous {
+    my $out_ext = shift;
+    my @in      = to_list(shift);
+    my @cmds    = @_;
+    my $hash    = md5_hex(join('|', 'anon', $out_ext, @in, '|', @cmds));
+    my $out     = "$V{TMP}/.anon/$hash$out_ext";
+
+    if (!exists $rules{$out}) {
+        generate($out, \@in, @cmds);
+    }
+
+    $out;
 }
 
 sub generate_copy {
