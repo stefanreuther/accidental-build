@@ -20,6 +20,9 @@ my @dir_vars;
 # List of input files
 my @input_files;
 
+# Commands
+my %commands;
+
 # Main
 my %V = (
     OUT => '.',
@@ -31,8 +34,10 @@ my %V = (
 my %user_vars;
 
 add_directory_variable(qw(OUT IN TMP));
+setup_commands();
 
 # Parse parameters
+my @args;
 foreach (@ARGV) {
     if (/^--?in=(.*)/) {
         set_user_variable(IN => $1);
@@ -54,14 +59,35 @@ foreach (@ARGV) {
     } elsif (/^(.*?)=(.*)/) {
         set_user_variable($1, $2);
     } else {
-        die "$0: unrecognized parameter \"$_\"\n";
+        push @args, $_;
     }
 }
 generate('all', []);
 rule_set_phony('all');
 rule_set_priority('all', 100);
-
 load_file("$V{IN}/$V{INFILE}");
+
+my $cmd = shift @args;
+if (!defined($cmd)) { $cmd = '' }
+if (!defined($commands{$cmd})) {
+    die "$0: unknown command '$cmd'\n";
+}
+$commands{$cmd}->(@args);
+exit 0;
+
+
+##
+##  Command Interface
+##
+
+sub setup_commands {
+    $commands{''} = $commands{'makefile'} = sub {
+        output_makefile();
+    };
+    $commands{'ninjafile'} = sub {
+        output_ninja_file();
+    };
+}
 
 
 ##
@@ -403,7 +429,7 @@ sub generate_rebuild_rule {
     add_variable('PERL', 'perl');
     generate($mf, [@input_files, $0],
              join(' ',
-                  "$V{PERL} $0",
+                  "$V{PERL} $0 makefile",
                   map {$_.'='.quotemeta($user_vars{$_})} sort keys %user_vars));
     rule_add_comment($mf, 'Automatically regenerate build file');
     rule_add_info($mf, "Rebuilding $mf");
@@ -548,6 +574,69 @@ sub output_makefile_only {
     close MF;
     rename "$mf.new", $mf
         or die "$mf: $!\n";
+}
+
+sub output_ninja_file {
+    # No implicit stuff needed. Ninja has rule change detection built in, as well as 'clean'.
+    verify();
+
+    my $nf = "$V{OUT}/build.ninja";
+    open NF, '>', "$nf.new" or die "$nf.new: $!\n";
+
+    # Boilerplate
+    print NF "rule generic\n";
+    print NF "  command = \$command\n";
+    print NF "\n";
+
+    # Output rules
+    foreach (sort {$rules{$b}{pri} <=> $rules{$a}{pri} || $a cmp $b} keys %rules) {
+        if (!$rules{$_}{did}) {
+            $rules{$_}{did} = 1;
+            print NF map {"# $_\n"} @{$rules{$_}{comment}};
+
+            my @in = $rules{$_}{phony} ? @{$rules{$_}{in}} : rule_get_inputs($_);
+            my @dep = grep {/\.d$/} @{$rules{$_}{out}};
+            my @out = grep {!/\.d$/} @{$rules{$_}{out}};
+
+            # Transform commands
+            my @code;
+            foreach (@{$rules{$_}{code}}) {
+                my $sep;
+                if (s/^-//) {
+                    $sep = '; ';
+                } else {
+                    $sep = ' && ';
+                }
+                s/^\@//;
+                push @code, $_, $sep;
+            }
+            if (@code) {
+                if ($code[-1] eq '; ') {
+                    push @code, 'true';
+                } else {
+                    pop @code;
+                }
+            }
+
+            # Phony?
+            if (!@code && $rules{$_}{phony}) {
+                print NF "build ", join(' ', @out), ": phony ", join(' ', @in), "\n";
+            } else {
+                print NF "build ", join(' ', @out), ": generic ", join(' ', @in), "\n";
+                print NF "  command = ", join('', @code), "\n";
+                print NF "  description = ", $rules{$_}{info}, "\n"
+                    if exists $rules{$_}{info};
+                print NF "  depfile = ", join(' ', @dep), "\n"
+                    if @dep;
+                print NF "\n";
+            }
+        }
+    }
+    print NF "default all\n";
+    print NF "\n";
+    close NF;
+    rename "$nf.new", $nf
+        or die "$nf: $!\n";
 }
 
 ##

@@ -17,6 +17,8 @@ Key features:
 
 * generates very efficient, non-recursive Makefile
 
+* preliminary ninja support
+
 
 
 How to Use
@@ -29,7 +31,6 @@ compile a single C file into a program:
     my $prog = "$V{OUT}/prog";
     my $src = "$V{IN}/prog.c";
     generate($prog, $src, "gcc -o $prog $src");
-    output_makefile();
 
 You would build this project using the following steps:
 
@@ -60,9 +61,6 @@ could use this `Rules.pl`:
     # Link everything into a program
     generate("$V{OUT}/prog", 'gcc -o $@ '.join(' ', @o));
 
-    # Create makefile
-    output_makefile();
-
 This program also demonstrates the use of `$<` and `$@` to interpolate
 the name of input and output files into a command line.
 
@@ -77,7 +75,6 @@ command line:
     my $cxx = add_variable(CXX => 'gcc');
     generate($prog, $src, "$cxx -o $prog $src");
     # or: generate($prog, $src, '$(CXX) -o $@ $<');
-    output_makefile();
 
 This will allow users to accept a command line such as
 
@@ -120,6 +117,19 @@ If a rule generates a `.d` file, that file will automatically be
 included into the Makefile using the `-include` command. By having
 your compiler create these files, we get automatic header file
 dependencies (for gcc, use `-MMD -MP`).
+
+
+### Ninja support
+
+Invoke it as
+
+    mkdir build_dir
+    cd build_dir
+    perl /path/to/Make.pl IN=/path/to/source ninjafile
+    ninja
+
+to generate a `build.ninja` file instead of a Makefile. This support
+is incomplete and probably not ideal yet.
 
 
 ### More
@@ -185,10 +195,10 @@ builtin rules (GNU make: `-r`) to reduce the number of files it looks
 at (this is an advantage ninja claims to have over Make).
 
 The above "asset" project currently clocks in at 365 output files and
-2465 temporary files. After a build, `make` needs 50 ms to determine
+2465 temporary files. After a build, GNU make needs 50 ms to determine
 that there's nothing more to be done, `make -r` needs just 17 ms on my
-machine. For a C++ project with ~900 source files we're at 250 ms vs.
-50 ms.
+machine (ninja: 9 ms). For a C++ project with ~900 source files we're
+at 250 ms vs. 50 ms (vs. 16 ms).
 
 
 
