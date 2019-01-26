@@ -28,8 +28,7 @@ my %V = (
     OUT => '.',
     IN => '.',
     TMP => 'tmp',
-    INFILE => 'Rules.pl',
-    OUTFILE => 'Makefile'
+    INFILE => 'Rules.pl'
 );
 my %user_vars;
 
@@ -81,11 +80,14 @@ exit 0;
 ##
 
 sub setup_commands {
-    $commands{''} = $commands{'makefile'} = sub {
+    $commands{''} = $commands{makefile} = sub {
         output_makefile();
     };
-    $commands{'ninjafile'} = sub {
+    $commands{ninjafile} = sub {
         output_ninja_file();
+    };
+    $commands{scriptfile} = sub {
+        output_script_file(@args);
     };
 }
 
@@ -527,15 +529,16 @@ sub generate_rule_hashes {
 # Generate output
 sub output_makefile {
     # Implicit makefile stuff
+    my $outfile = add_variable(OUTFILE => 'Makefile');
     generate_rule_hashes();    # first, because we don't want a rule hash for the next parts
-    generate_rebuild_rule();
+    generate_rebuild_rule();   # needs $V{OUTFILE}
     generate_clean_rule();
     generate_phony_rule();     # last, to pick up phony targets created above
 
     verify();
 
     # Write it
-    output_makefile_only("$V{OUT}/$V{OUTFILE}");
+    output_makefile_only("$V{OUT}/$outfile");
 }
 
 sub output_makefile_only {
@@ -578,9 +581,10 @@ sub output_makefile_only {
 
 sub output_ninja_file {
     # No implicit stuff needed. Ninja has rule change detection built in, as well as 'clean'.
+    my $outfile = add_variable(OUTFILE => 'build.ninja');
     verify();
 
-    my $nf = "$V{OUT}/build.ninja";
+    my $nf = "$V{OUT}/$outfile";
     open NF, '>', "$nf.new" or die "$nf.new: $!\n";
 
     # Boilerplate
@@ -599,31 +603,14 @@ sub output_ninja_file {
             my @out = grep {!/\.d$/} @{$rules{$_}{out}};
 
             # Transform commands
-            my @code;
-            foreach (@{$rules{$_}{code}}) {
-                my $sep;
-                if (s/^-//) {
-                    $sep = '; ';
-                } else {
-                    $sep = ' && ';
-                }
-                s/^\@//;
-                push @code, $_, $sep;
-            }
-            if (@code) {
-                if ($code[-1] eq '; ') {
-                    push @code, 'true';
-                } else {
-                    pop @code;
-                }
-            }
+            my $code = join_commands(@{$rules{$_}{code}});
 
             # Phony?
-            if (!@code && $rules{$_}{phony}) {
+            if ($code eq '' && $rules{$_}{phony}) {
                 print NF "build ", join(' ', @out), ": phony ", join(' ', @in), "\n";
             } else {
                 print NF "build ", join(' ', @out), ": generic ", join(' ', @in), "\n";
-                print NF "  command = ", join('', @code), "\n";
+                print NF "  command = ", $code, "\n";
                 print NF "  description = ", $rules{$_}{info}, "\n"
                     if exists $rules{$_}{info};
                 print NF "  depfile = ", join(' ', @dep), "\n"
@@ -637,6 +624,58 @@ sub output_ninja_file {
     close NF;
     rename "$nf.new", $nf
         or die "$nf: $!\n";
+}
+
+sub output_script_file {
+    my @todo = @_;
+    my $outfile = add_variable(OUTFILE => 'build.sh');
+
+    verify();
+
+    my $sf = "$V{OUT}/$outfile";
+    open SF, '>', "$sf.new" or die "$sf.new: $!\n";
+    print SF "#\n";
+    print SF "#  Build script for ", join(' ', @todo), "\n";
+    print SF "#\n";
+    print SF "#  Input files:\n";
+    print SF map{"#   $_\n"} @input_files;
+    print SF "#\n\n\n";
+
+    while (@todo) {
+        my $rule = $rules{$todo[0]};
+        if (!$rule) {
+            # Unknown input, assume it is a source file
+            shift @todo;
+        } elsif (!$rule->{did}) {
+            # We didn't see this rule yet. Queue its dependencies and mark it pending.
+            unshift @todo, grep {!$rules{$_}{did}} @{$rule->{in}};
+            $rule->{did} = 1;
+        } else {
+            # Output rule
+            my $old_pos = tell(SF);
+            print SF map {"# $_\n"} @{$rule->{comment}};
+            print SF "echo \"$rule->{info}\"\n"
+                if exists $rule->{info};
+
+            foreach (@{$rule->{code}}) {
+                my $sep;
+                if (s/^-//) {
+                    $sep = "\n";
+                } else {
+                    $sep = " || exit 1\n";
+                }
+                s/^\@//;
+                print SF $_, $sep;
+            }
+            print SF "\n"
+                if tell(SF) != $old_pos;
+            shift @todo;
+        }
+    }
+
+    close SF;
+    rename "$sf.new", $sf
+        or die "$sf: $!\n";
 }
 
 ##
@@ -755,6 +794,29 @@ sub is_subset {
         return 0 if !grep {$e eq $_} @$big;
     }
     return 1;
+}
+
+# Given a list of commands, join these to a single command.
+sub join_commands {
+    my @code;
+    foreach (@_) {
+        my $sep;
+        if (s/^-//) {
+            $sep = '; ';
+        } else {
+            $sep = ' && ';
+        }
+        s/^\@//;
+        push @code, $_, $sep;
+    }
+    if (@code) {
+        if ($code[-1] eq '; ') {
+            push @code, 'true';
+        } else {
+            pop @code;
+        }
+    }
+    join('', @code);
 }
 
 ##
