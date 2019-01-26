@@ -71,6 +71,17 @@ sub try_exec {
     return $err == 0 ? 1 : 0;
 }
 
+# Execute a command and return its output.
+#   try_exec_output(@command)
+# Returns command output as string.
+sub try_exec_output {
+    my $cmd = join(' ', @_);
+    log_trace("Executing '$cmd'...");
+    my $result = `$cmd`;
+    chomp($result);
+    $result;
+}
+
 # Try compiling a file using CXX/CXXFLAGS.
 #   try_compile($file, {var=>$value}, $commit)
 # First parameter: file name
@@ -98,7 +109,7 @@ sub try_link {
     my $cxxflags = get_variable('CXXFLAGS', $vars);
     my $ldflags  = get_variable('LDFLAGS', $vars);
     my $libs     = get_variable('LIBS', $vars);
-    
+
     my $result = try_exec "$cxx $cxxflags $file -o $V{TMP}/.conf/tmp.exe $ldflags $libs >/dev/null 2>&1";
     if ($result && $commit) {
         set_variable(%$vars);
@@ -180,39 +191,136 @@ sub find_system_libraries {
 }
 
 # Find library.
-#   find_library($key, $libs, $prog, $name)
+#   find_library($key, @opts)
 # First parameter: variable to set, typically something like WITH_FOO
-# Second parameter: library options to add, '-lfoo'
-# Third parameter: test program content
-# Fourth parameter: user-friendly name.
+# Options are a list of key=>value pairs:
+#    program        a program to try-compile
+#    libs           default libraries '-lfoo'
+#    pkg            name of library in 'pkg-config'
+#    name           user-friendly name
+#    dir            directory. Suggestion: pass add_variable(FOO_DIR => '').
 #
-# Tries to link $prog against $libs, and sets $key (WITH_FOO) to 1 if it works.
-# If user gave a "--with-foo" option, verifies that it works and fails if not.
+# Tries to locate the library.
+# If --with-foo (WITH_FOO=1) is given, it is an error if it cannot be found,
+# if --without-foo (WITH_FOO=0) is given, it is not used.
+#
+# If a 'dir' and 'program' are given, attempts to construct appropriate -L, -I options.
+# If 'pkg' is given, attempts to locate the library using pkg-config,
+# and optionally verifies it against 'program'.
+# pkg-config can be disabled by setting USE_PKGCONFIG=0.
+# If everything fails, tries whether just linking against the library already works;
+# this is the case if the library is installed as a system library or the user
+# has given appropriate CXXFLAGS/LIBS.
 sub find_library {
     my $key = shift;
-    my $libs = shift;
-    my $prog = shift;
-    my $name = shift || $key;
+    my %opts = @_;
 
+    # Sanitize parameters
+    my $name = $opts{name} || $key;
+    my $prog = $opts{program} ? file_create_temp($opts{program}, '.c') : '';
+    my $libs = $opts{libs} || '';
+    my $dir  = $opts{dir}  || '';
+    my $pkg  = $opts{pkg}  || '';
+
+    # Set up output variables
     add_variable($key => '',
-                 LIBS => '');
+                 LIBS => '',
+                 CXXFLAGS => '');
+    my $use_pkgconfig = add_variable(USE_PKGCONFIG => 1);
 
-    my $file_name = file_create_temp($prog, '.c');
-    my $flags = {LIBS => "$V{LIBS} ".$libs};
-    if ($V{$key} eq '') {
-        # auto
-        set_variable($key, try_link($file_name, $flags, 1));
-    } elsif ($V{$key}) {
-        # explicitly enabled
-        if (!try_link($file_name, $flags, 1)) {
+    if ($V{$key} eq '' || $V{$key}) {
+        # auto or explicitly enabled
+        my $ok = 0;
+        if ($dir ne '' && $prog ne '' && $libs ne '') {
+            # Probe provided directory names
+            foreach my $d (split /\s+/, $dir) {
+                if (-d "$d/lib" && -d "$d/include" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d/lib", CXXFLAGS => "$V{CXXFLAGS} -I$d/include" }, 1)) {
+                    log_info("Enabled $name (standard)");
+                    $ok = 1;
+                    last;
+                }
+                if (-d "$d" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d", CXXFLAGS => "$V{CXXFLAGS} -I$d" }, 1)) {
+                    log_info("Enabled $name (flat)");
+                    $ok = 1;
+                    last;
+                }
+            }
+        }
+        if (!$ok && $pkg ne '' && $use_pkgconfig && try_exec("pkg-config --exists $pkg")) {
+            # pkg-config claims it's there
+            my $libs = try_exec_output("pkg-config --libs $pkg");
+            my $incs = try_exec_output("pkg-config --cflags-only-I $pkg");
+            my $flags = { LIBS => "$V{LIBS} $libs", CXXFLAGS => "$V{CXXFLAGS} $incs" };
+            if ($prog ne '') {
+                # We have a test program; verify that pkg-config output is correct
+                if (try_link($prog, $flags, 1)) {
+                    log_info("Enabled $name (verified pkg-config)");
+                    $ok = 1;
+                }
+            } else {
+                # Accept unchecked
+                log_info("Enabled $name (pkg-config)");
+                set_variable(%$flags);
+                $ok = 1;
+            }
+        }
+        if (!$ok && $prog ne '' && $libs ne '') {
+            # If still not found, try whether we can link as-is
+            # (e.g. if user specified explicit CXXFLAGS/LIBS)
+            if (try_link($prog, { LIBS => "$V{LIBS} $libs" }, 1)) {
+                log_info("Enabled $name (system)");
+                $ok = 1;
+            }
+        }
+        if (!$ok && $V{$key}) {
             die "Error: unable to use $name although explicitly requested; change '$key='";
         }
+        $V{$key} = $ok;
     } else {
-        # explicitly disabled
+        # explicitly disabled, do nothing else
     }
-    if ($V{$key}) {
-        log_info("Enabled $name.");
-    } else {
+
+    if (!$V{$key}) {
         log_info("Disabled $name.");
     }
+    $V{$key};
+}
+
+# Find directory.
+#   find_directory($key, @opts)
+# First parameter: variable to set, typically something like FOO_DIR.
+# Options are a list of key=>value pairs:
+#    name           user-friendly name
+#    files          reference to list of file names that need to be in the directory
+#    guess          reference to list of guesses for the directory name
+#
+# If files are given, they need to be present in a directory to be acceptable.
+# If guesses are given, they are tried (check files, or just presence of directory)
+# to find a directory if none is given.
+sub find_directory {
+    my $key = shift;
+    my %opts = @_;
+
+    # Sanitize parameters
+    my $name = $opts{name} || $key;
+    my @files = to_list($opts{files});
+
+    # Guess directory if needed
+    my $dir = add_variable($key => '');
+    if ($dir eq '') {
+        foreach my $d (to_list($opts{guess})) {
+            if (@files ? file_exists_at_path($d, @files) : -d $d) {
+                $dir = $d;
+                last;
+            }
+        }
+    }
+
+    # Postprocess
+    if ($dir eq '' || (@files && !file_exists_at_path($dir, @files))) {
+        die "Error: please specify correct directory for $name\n";
+    }
+    set_variable($key, $dir);
+    log_info("Using $key: $dir");
+    $dir;
 }
