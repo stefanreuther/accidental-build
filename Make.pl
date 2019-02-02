@@ -6,7 +6,7 @@ use Digest::MD5 qw(md5_hex);
 #    in : [str]          input files
 #    out : [str]         output files
 #    code : [str]        commands
-#    dir : int           is this a directory?
+#    dir : int           is this a directory? (excempt from hash generation)
 #    pri : int           order for output, highest at front
 #    comment : [str]     comment
 #    info : str          info/status message
@@ -66,6 +66,7 @@ rule_set_phony('all');
 rule_set_priority('all', 100);
 load_file("$V{IN}/$V{INFILE}");
 
+# Process command
 my $cmd = shift @args;
 if (!defined($cmd)) { $cmd = '' }
 if (!defined($commands{$cmd})) {
@@ -100,27 +101,22 @@ sub setup_commands {
 #    generate_directory($x)
 # Makes a rule to create the directory $x.
 # Parents will also be created.
+#
+# Returns name to use as dependency.
+# All files within that directory should depend on this name.
 sub generate_directory {
     my $dir = normalize_filename(shift);
-    if (exists($rules{$dir})) {
-        if (!$rules{$dir}{dir}) {
-            die "Rule type conflict.\n".
-                "Requested directory: ".$dir."\n".
-                "Rule already describes a file.\n";
-        }
-    } else {
+    my $mark = "$dir/.mark";
+    if (!exists($rules{$mark})) {
         my $mkdir = add_variable('MKDIR', 'mkdir');
         my $touch = add_variable('TOUCH', 'touch');
-        my $mark = "$dir/.mark";
         my $rule = { in => [], out => [$mark], code => ["-\@$mkdir -p $dir", "\@$touch $mark"], dir => 1, pri => -99, precious => 1 };
         $rules{$mark} = $rule;
         if ($dir =~ m|^(.*)/|) {
-            my $p = $1;
-            push_unique($rule->{in}, "$p/.mark");
-            generate_directory($p);
+            push_unique($rule->{in}, generate_directory($1));
         }
     }
-    $dir;
+    $mark;
 }
 
 # Generate files.
@@ -133,12 +129,26 @@ sub generate_directory {
 # additional commands added. For example, `generate("all", X)` adds X to the `make all`
 # target; `generate("clean", [], "rm X")` adds a command to `make clean`.
 #
+# It is an error to add a rule with multiple outputs if different rules already exist for individual outputs.
+# For example,
+#    generate('a', [], 'cmd a');
+#    generate('b', [], 'cmd b');
+#    generate(['a', 'b'] [], 'cmd a+b');
+# will not work. In contrast,
+#    generate(['a', 'b'] [], 'cmd a+b');
+#    generate('a', [], 'cmd a');
+#    generate('b', [], 'cmd b');
+# will work, as the first rule to mention a and b establishes that both are created in one rule,
+# and the second and third calls extend that rule.
+#
 # Variables will be expanded in the commands. Syntax is similar to Makefiles, that is,
 # `$X` for single-character names, `$(XX)` for longer names. Variables added with
 # `add_variable()`, `set_variable()` are recognized in addition to
 #    $$ - dollar sign
 #    $@ - first output
 #    $< - first input
+#
+# Returns the first element of $out.
 sub generate {
     my @out = map {normalize_filename($_)} to_list(shift);
     my @in  = map {normalize_filename($_)} to_list(shift);
@@ -178,11 +188,6 @@ sub generate {
         push_unique($rule->{out}, @out);
         push_unique($rule->{in}, @in);
         push @{$rule->{code}}, @code;
-        if ($rule->{dir}) {
-            die "Rule type conflict.\n".
-                "Requested files: ".join(' ', @out)."\n".
-                "Rule already describes a directory.\n";
-        }
     } else {
         $rule = { in => [@in], out => [@out], code => [@code], dir => 0, pri => $pri };
         foreach (@out) {
@@ -192,10 +197,8 @@ sub generate {
 
     # Add directories
     foreach (@out) {
-        if (m|^(.*)/| && !m!^(\.\./|/)!) {
-            my $dir = $1;
-            push_unique($rule->{in}, "$dir/.mark");
-            generate_directory($dir);
+        if (!m!^(\.\./|/)! && m|^(.*)/|) {
+            push_unique($rule->{in}, generate_directory($1));
         }
     }
 
@@ -230,7 +233,8 @@ sub generate_unique {
             if (!defined $rule) {
                 $rule = $rules{$_}
             } else {
-                return 0;
+                return 0
+                    if $rule ne $rules{$_};
             }
         }
     }
@@ -309,7 +313,8 @@ sub rule_add_info {
 
 # Make rules phony.
 #    rule_set_phony(@rules...)
-# Generates a .PHONY target.
+# Phony rules do not create actual files, but are only intended to invoke particular command sequences,
+# such as `make test`.
 sub rule_set_phony {
     foreach (@_) {
         _rule_get($_)->{phony} = 1;
@@ -325,49 +330,74 @@ sub rule_set_precious {
     }
 }
 
+# Add link inputs.
+#    rule_add_link($rule, @link_inputs)
+# If a target depends on a rule, and rule_add_link() has been called for that rule,
+# it will depend on @link_inputs instead.
+#
+# If $rule is a library to be linked, @link_inputs must also mention it.
+# @link_inputs can also contain linker switches, i.e. "-lfoo".
+#
+# For example,
+#    rule_add_link('libfoo.a', 'libfoo.a libbar.a -lpthread')
+# declares that all programs that depend to `libfoo.a` will actually depend on both `libfoo.a`
+# and `libbar.a`, and also link with `-lpthread`; see `rule_get_link_inputs`.
 sub rule_add_link {
     my $rule = shift;
     push @{_rule_get($rule)->{link}}, @_;
 }
 
-sub rule_get_inputs {
-    my @todo = map {$rules{$_} && $rules{$_}{in} ? @{$rules{$_}{in}} : ()} @_;
-    my @result;
-    my %did;
-    while (@todo) {
-        my $item = shift @todo;
-        if ($item =~ /^-/) {
-            # Option
-        } elsif (!$rules{$item} || !$rules{$item}{link}) {
-            # Regular rule, just output
-            push_unique(\@result, $item);
-        } else {
-            # Library rule. Map to actual inputs
-            $did{$item} = 1;
-            push_unique(\@result, @{$rules{$item}{in}});
-            push @todo, grep {!$did{$_}++} @{$rules{$item}{link}};
-        }
-    }
-    @result;
-}
-
-sub rule_get_link_inputs {
+# Flatten aliases.
+#    rule_flatten_aliases(@rules...)
+# A phony rule of the form "foo : libfoo.a" is called an alias;
+# here, 'foo' is a convenience name, and 'libfoo.a' is the actual file.
+# Given a list of rule names, this function replaces all phony rules by their dependees, recursively.
+# Names that do not map to rules are passed through as-is; in particular, "-lfoo' switches.
+# As an exception, if the rule specifies linker inputs, it is returned as is and not expanded.
+sub rule_flatten_aliases {
     my @todo = @_;
     my @result;
     my %did;
     while (@todo) {
         my $item = shift @todo;
-        if ($item =~ /^-/) {
-            # Option
-            push @result, $item;
-        } elsif (!$rules{$item} || !$rules{$item}{link}) {
-            # Regular rule, just output
-            push_unique(\@result, $item);
+        if ($did{$item}++) {
+            # Already did this one, avoid loop
+        } elsif ($rules{$item} && $rules{$item}{phony} && !$rules{$item}{link}) {
+            # Phony rule (=alias); expand
+            unshift @todo, @{$rules{$item}{in}};
         } else {
-            # Library rule. Map to actual inputs
-            $did{$item} = 1;
-            push_unique(\@result, @{$rules{$item}{in}});
-            push @todo, grep {!$did{$_}++} @{$rules{$item}{link}};
+            # Regular rule or special item
+            push_unique(\@result, $item);
+        }
+    }
+    @result;
+}
+
+# Get linker inputs.
+#    rule_get_link_inputs(@rules...)
+# If a rules has linker inputs (rule_add_link), returns those; otherwise, returns just the rule names.
+sub rule_get_link_inputs {
+    my @result;
+    foreach my $item (@_) {
+        if ($rules{$item} && $rules{$item}{link}) {
+            # Link special
+            push_unique_last(\@result, @{$rules{$item}{link}});
+        } else {
+            # Regular
+            push_unique_last(\@result, $item);
+        }
+    }
+    @result;
+}
+
+# Get rule inputs.
+#    rule_get_inputs(@rules...)
+# If the rule's inputs include libraries (rule_add_link), does the appropriate replacement.
+sub rule_get_inputs {
+    my @result;
+    foreach my $item (@_) {
+        if ($rules{$item}{in}) {
+            push_unique_last(\@result, rule_get_link_inputs(@{$rules{$item}{in}}));
         }
     }
     @result;
@@ -423,12 +453,12 @@ sub _rule_get {
 ##  Special-Purpose Rules
 ##
 
-# Generate rebuild rule.
+# Internal: Generate rebuild rule.
 #   generate_rebuild_rule()
 # The rule will automatically rebuild the Makefile if any input file changed.
 sub generate_rebuild_rule {
     my $mf = normalize_filename("$V{OUT}/$V{OUTFILE}");
-    add_variable('PERL', 'perl');
+    add_variable('PERL', $^X);
     generate($mf, [@input_files, $0],
              join(' ',
                   "$V{PERL} $0 makefile",
@@ -446,7 +476,7 @@ sub generate_rebuild_rule {
     }
 }
 
-# Generate .PHONY rule.
+# Internal: Generate .PHONY rule.
 #   generate_phony_rule()
 # Adds a '.PHONY' rule for all rules marked with rule_set_phony().
 sub generate_phony_rule {
@@ -459,16 +489,20 @@ sub generate_phony_rule {
     rule_set_phony('.PHONY');
 }
 
-# Generate clean rule.
+# Internal: Generate `clean` rule.
 #   generate_clean_rule()
 # This rule will remove all outputs not marked rule_set_phony() or rule_set_precious().
 sub generate_clean_rule {
-    my @files;
-    foreach (sort keys %rules) {
-        push_unique(\@files, @{$rules{$_}{out}})
-            unless $rules{$_}{precious} || $rules{$_}{phony};
+    my %files;
+    foreach (keys %rules) {
+        if (!$rules{$_}{precious} && !$rules{$_}{phony}) {
+            foreach (@{$rules{$_}{out}}) {
+                $files{$_} = 1
+            }
+        }
     }
 
+    my @files = sort keys %files;
     my @cmds;
     my $line = '';
     my $n = 0;
@@ -486,13 +520,16 @@ sub generate_clean_rule {
     }
     push @cmds, $V{RM}.$line
         if $line ne '';
+    if (@cmds > 100) {
+        push @cmds, "echo Done.";
+    }
 
     generate('clean', [], @cmds);
     rule_set_phony('clean');
     rule_add_info('clean', 'Cleaning up');
 }
 
-# Generate rule hashes.
+# Internal: Generate rule hashes.
 #    generate_rule_hashes()
 # Builds makefile rules that will make rules rerun if the rule content changes,
 # even if the input files are unchanged.
@@ -504,6 +541,8 @@ sub generate_rule_hashes {
     # Build rule hashes for all targets except directories (no need to track) and phony rules (will rerun anyway).
     my %hashes;
     foreach (keys %rules) {
+        print "null input on $_\n" if ! $rules{$_}{in};
+        print "null code on $_\n"  if ! $rules{$_}{code};
         $hashes{$_} = md5_hex(join("\n", join(' ', @{$rules{$_}{in}}), @{$rules{$_}{code}}))
             unless $rules{$_}{dir} || $rules{$_}{phony};
     }
@@ -526,7 +565,7 @@ sub generate_rule_hashes {
 ##  Output
 ##
 
-# Generate output
+# Generate Makefile
 sub output_makefile {
     # Implicit makefile stuff
     my $outfile = add_variable(OUTFILE => 'Makefile');
@@ -538,11 +577,7 @@ sub output_makefile {
     verify();
 
     # Write it
-    output_makefile_only("$V{OUT}/$outfile");
-}
-
-sub output_makefile_only {
-    my $mf = shift;
+    my $mf = "$V{OUT}/$outfile";
     open MF, '>', "$mf.new" or die "$mf.new: $!\n";
 
     foreach (sort {$rules{$b}{pri} <=> $rules{$a}{pri} || $a cmp $b} keys %rules) {
@@ -550,7 +585,9 @@ sub output_makefile_only {
             $rules{$_}{did} = 1;
             print MF map {"# $_\n"} @{$rules{$_}{comment}};
 
-            my @in = $rules{$_}{phony} ? @{$rules{$_}{in}} : rule_get_inputs($_);
+            # The special-case for phony is required to correctly generate the inputs of .PHONY and can probably be dropped
+            # if we move generation of the .PHONY rule out.
+            my @in  = $rules{$_}{phony} ? @{$rules{$_}{in}} : grep {!/^-/} rule_get_inputs($_);
             my @out = grep {!/\.d$/} @{$rules{$_}{out}};
             if (length(join(' ', @in)) > 140) {
                 print MF join(" \\\n  ", join(' ', @out, ":"), @in), "\n";
@@ -579,6 +616,7 @@ sub output_makefile_only {
         or die "$mf: $!\n";
 }
 
+# Generate build.ninja
 sub output_ninja_file {
     # No implicit stuff needed. Ninja has rule change detection built in, as well as 'clean'.
     my $outfile = add_variable(OUTFILE => 'build.ninja');
@@ -598,7 +636,7 @@ sub output_ninja_file {
             $rules{$_}{did} = 1;
             print NF map {"# $_\n"} @{$rules{$_}{comment}};
 
-            my @in = $rules{$_}{phony} ? @{$rules{$_}{in}} : rule_get_inputs($_);
+            my @in  = $rules{$_}{phony} ? @{$rules{$_}{in}} : grep {!/^-/} rule_get_inputs($_);
             my @dep = grep {/\.d$/} @{$rules{$_}{out}};
             my @out = grep {!/\.d$/} @{$rules{$_}{out}};
 
@@ -626,8 +664,12 @@ sub output_ninja_file {
         or die "$nf: $!\n";
 }
 
+# Generate build.sh
 sub output_script_file {
     my @todo = @_;
+    if (!@todo) {
+        die "Please specify targets to build for \"$0 scriptfile\"\n";
+    }
     my $outfile = add_variable(OUTFILE => 'build.sh');
 
     verify();
@@ -746,21 +788,23 @@ sub normalize_filename {
             }
         }
     }
-    join('/', @com);
+    @com ? join('/', @com) : '.';
 }
 
 sub make_temp_filename {
     my $file = shift;
-    if (substr($file, 0, length($V{IN})) eq $V{IN}) {
+    my $in = get_variable('IN', @_);
+    my $tmp = get_variable('TMP', @_);
+    if (substr($file, 0, length($in)) eq $in) {
         # input/foo/bar --> tmp/foo/bar
-        $V{TMP}.substr($file, length($V{IN}));
-    } elsif (substr($file, 0, length($V{TMP})) eq $V{TMP}) {
+        $tmp.substr($file, length($in));
+    } elsif (substr($file, 0, length($tmp)) eq $tmp) {
         # tmp/foo/bar remains as is
         $file;
     } else {
         # whatever/x/y/z --> tmp/whatever/x/y/z
         $file =~ s|\.\.|__|g;
-        normalize_filename($V{TMP}, $file);
+        normalize_filename($tmp, $file);
     }
 }
 
@@ -776,16 +820,28 @@ sub push_unique {
     }
 }
 
+sub push_unique_last {
+    my $list = shift;
+    foreach my $v (@_) {
+        @$list = grep {$_ ne $v} @$list;
+        push @$list, $v;
+    }
+}
+
 sub to_list {
     my $x = shift;
     return (!defined($x) ? () : ref($x) eq 'ARRAY' ? @$x : ($x));
 }
 
 sub to_prefix_list {
-    my ($prefix, $list) = @_;
-    return (!defined($list)
-            ? ()
-            : map {"$prefix/$_"} (ref($list) eq 'ARRAY' ? @$list : split /\s+/, $list));
+    my $prefix = shift;
+    my @result;
+    foreach (@_) {
+        if (defined($_)) {
+            push @result, map {normalize_filename($prefix, $_)} (ref($_) eq 'ARRAY' ? @$_ : split /\s+/, $_);
+        }
+    }
+    @result;
 }
 
 sub is_subset {

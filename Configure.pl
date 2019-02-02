@@ -320,6 +320,7 @@ sub find_directory {
     if ($dir eq '' || (@files && !file_exists_at_path($dir, @files))) {
         die "Error: please specify correct directory for $name\n";
     }
+    $dir = normalize_filename($dir);
     set_variable($key, $dir);
     log_info("Using $key: $dir");
     $dir;

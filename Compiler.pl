@@ -16,7 +16,7 @@ sub compile_file {
         # C/C++
         my $uniq = '';
         while (1) {
-            my $base = make_temp_filename("$dir$stem$uniq");
+            my $base = make_temp_filename("$dir$stem$uniq", $opts, $opts->{$file});
             my $o = "$base.o";
             my $d = "$base.d";
             my $cxx = get_variable('CXX', $opts, $opts->{$file});
@@ -39,7 +39,7 @@ sub compile_file {
     } else {
         die "I do not know how to compile \"$file\"\n";
     }
-    @result;
+    wantarray ? @result : $result[0];
 }
 
 sub compile_static_library {
@@ -75,7 +75,7 @@ sub compile_static_library {
         generate($stem, $out);
         rule_set_phony($stem);
     }
-    rule_add_link($stem, to_list($libs));
+    rule_add_link($out, $out, rule_get_link_inputs(to_list($libs)));
     $out;
 }
 
@@ -85,7 +85,7 @@ sub compile_static_library {
 sub compile_executable {
     my ($exe, $src, $lib, $opts) = @_;
     my @objs = map {compile_file($_, $opts)} to_list($src);
-    my @libs = to_list($lib);
+    my @libs = rule_flatten_aliases(to_list($lib));
     my $suffix = add_variable('EXE_SUFFIX', '');
     my $out = normalize_filename("$V{OUT}", "$exe$suffix");
 
@@ -117,5 +117,5 @@ sub compile_add_prebuilt_library {
 
     generate($name, $file);
     rule_set_phony($name);
-    rule_add_link($name, to_list($deps));
+    rule_add_link($name, $file, to_list($deps));
 }
