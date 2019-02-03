@@ -426,17 +426,20 @@ sub rule_rebuild_directory {
         }
     }
 
+    # Variables
+    my $rm = add_variable('RM', 'rm -f');
+    my $touch = add_variable('TOUCH', 'touch');
+
     # Generate hash rule
     my $child_hash = md5_hex(join("\n", sort @children));
     my $name_hash = md5_hex($mark);
     my $n1 = substr($name_hash, 0, 2);
     my $n2 = substr($name_hash, 2);
     my $hash_file = "$V{TMP}/.hash/$n1/${n2}_${child_hash}";
-    my $rm = add_variable('RM', 'rm -f');
     generate($hash_file, [],
              "\@$rm $V{TMP}/.hash/$n1/${n2}_*",
              "\@$rm -r $dir",
-             "\@touch $hash_file");
+             "\@$touch $hash_file");
     push_unique($rules{$mark}{in}, $hash_file);
     rule_set_priority($hash_file, -100);
     rule_add_comment($hash_file, "Rule change marker for $dir");
@@ -506,19 +509,19 @@ sub generate_clean_rule {
     my @cmds;
     my $line = '';
     my $n = 0;
-    add_variable('RM', 'rm -f');
+    my $rm = add_variable('RM', 'rm -f');
     foreach (@files) {
         ++$n;
         $line .= ' '.$_;
         if (length($line) > 120) {
-            push @cmds, $V{RM}.$line;
+            push @cmds, $rm.$line;
             $line = '';
             if (@cmds % 100 == 0) {
                 push @cmds, sprintf ("echo \"\tCleaning up (%d%%)...\"", 100 * $n / scalar(@files));
             }
         }
     }
-    push @cmds, $V{RM}.$line
+    push @cmds, $rm.$line
         if $line ne '';
     if (@cmds > 100) {
         push @cmds, "echo Done.";
@@ -536,13 +539,12 @@ sub generate_clean_rule {
 sub generate_rule_hashes {
     # The idea is to generate a marker file "xx_yy", where "xx" identifies the file in question, and "yy" identifies the rule content.
     # If rule content changes, removing "xx_*" will remove old rule hashes.
-    add_variable('RM', 'rm -f');
+    my $rm = add_variable('RM', 'rm -f');
+    my $touch = add_variable('TOUCH', 'touch');
 
     # Build rule hashes for all targets except directories (no need to track) and phony rules (will rerun anyway).
     my %hashes;
     foreach (keys %rules) {
-        print "null input on $_\n" if ! $rules{$_}{in};
-        print "null code on $_\n"  if ! $rules{$_}{code};
         $hashes{$_} = md5_hex(join("\n", join(' ', @{$rules{$_}{in}}), @{$rules{$_}{code}}))
             unless $rules{$_}{dir} || $rules{$_}{phony};
     }
@@ -553,7 +555,9 @@ sub generate_rule_hashes {
         my $n1 = substr($nameHash, 0, 2);
         my $n2 = substr($nameHash, 2);
         my $hashFile = "$V{TMP}/.hash/$n1/${n2}_${codeHash}";
-        generate($hashFile, [], "\@$V{RM} $V{TMP}/.hash/$n1/${n2}_* $_", "\@touch $hashFile");
+        generate($hashFile, [],
+                 "\@$rm $V{TMP}/.hash/$n1/${n2}_* $_",
+                 "\@$touch $hashFile");
         push_unique($rules{$_}{in}, $hashFile);
         rule_set_priority($hashFile, -100);
         rule_add_comment($hashFile, "Rule change marker for $_");
@@ -907,6 +911,17 @@ sub set_variable {
         my $k = shift;
         my $v = shift;
         $V{$k} = $v;
+    }
+}
+
+sub add_to_variable {
+    my $k = shift;
+    foreach (@_) {
+        if (!exists $V{$k} || $V{$k} eq '') {
+            $V{$k} = $_;
+        } else {
+            $V{$k} .= ' ' . $_;
+        }
     }
 }
 
