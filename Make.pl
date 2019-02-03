@@ -285,6 +285,17 @@ sub generate_copy {
     generate($out, $in, "\@$cp $in $out");
 }
 
+# Copy files to a directory.
+#    generate_copy_to_dir($out, @in...)
+# Shortcut for copying multiple files.
+sub generate_copy_to_dir {
+    my $dir = shift;
+    map {
+        my ($in_dir, $base, $ext) = split_filename($_);
+        generate_copy(normalize_filename($dir, $base.$ext), $_);
+    } @_;
+}
+
 # Set priority of a rule.
 #    rule_set_priority($rule, $pri)
 # High priorities place the rule at the beginning of the Makefile, low priorities at the end.
