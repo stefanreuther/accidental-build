@@ -90,6 +90,9 @@ sub setup_commands {
     $commands{scriptfile} = sub {
         output_script_file(@args);
     };
+    $commands{"show-vars"} = sub {
+        show_variables();
+    };
 }
 
 
@@ -980,6 +983,22 @@ sub get_variable {
 sub get_variable_merge {
     my $k = shift;
     return join(' ', grep {defined && !ref} map {$_->{$k}} \%V, @_);
+}
+
+sub show_variables {
+    foreach my $k (sort keys %V) {
+        print "$k = $V{$k}\n";
+        if (exists $user_vars{$k}) {
+            if ($user_vars{$k} eq $V{$k}) {
+                print "\t# user-set\n";
+            } else {
+                print "\t# user-set: $user_vars{$k})\n";
+            }
+        }
+        if (grep {$_ eq $k} @dir_vars) {
+            print "\t# directory\n";
+        }
+    }
 }
 
 sub _sanitize_variable_name {
