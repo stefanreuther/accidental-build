@@ -188,6 +188,9 @@ sub generate {
         push_unique($rule->{out}, @out);
         push_unique($rule->{in}, @in);
         push @{$rule->{code}}, @code;
+        foreach (@out) {
+            $rules{$_} = $rule;
+        }
     } else {
         $rule = { in => [@in], out => [@out], code => [@code], dir => 0, pri => $pri };
         foreach (@out) {
@@ -302,6 +305,7 @@ sub generate_copy_to_dir {
 sub rule_set_priority {
     my ($rule, $pri) = @_;
     _rule_get($rule)->{pri} = $pri;
+    $rule;
 }
 
 # Add comment to a rule.
@@ -311,6 +315,7 @@ sub rule_set_priority {
 sub rule_add_comment {
     my $rule = shift;
     push @{_rule_get($rule)->{comment}}, @_;
+    $rule;
 }
 
 # Add information to a rule.
@@ -320,6 +325,7 @@ sub rule_add_comment {
 sub rule_add_info {
     my ($rule, $info) = @_;
     _rule_get($rule)->{info} = $info;
+    $rule;
 }
 
 # Make rules phony.
@@ -356,6 +362,7 @@ sub rule_set_precious {
 sub rule_add_link {
     my $rule = shift;
     push @{_rule_get($rule)->{link}}, @_;
+    $rule;
 }
 
 # Flatten aliases.
@@ -769,6 +776,34 @@ sub file_update {
     log_info("Created $file.");
 }
 
+sub get_directory_content {
+    my $dir = normalize_filename(shift);
+    push @input_files, $dir
+        unless grep {$_ eq $dir} @input_files;
+
+    my @result;
+    opendir my $dh, $dir or die "$dir: $!";
+    foreach my $e (sort readdir $dh) {
+        if ($e !~ /^\./ && $e ne 'CVS' && $e !~ /~$/) {
+            push @result, normalize_filename($dir, $e);
+        }
+    }
+    closedir $dh;
+    @result;
+}
+
+sub get_directory_content_recursively {
+    my $dir = normalize_filename(shift);
+    my @result;
+    foreach (get_directory_content($dir)) {
+        push @result, $_;
+        if (-d $_) {
+            push @result, get_directory_content_recursively($_);
+        }
+    }
+    @result;
+}
+
 
 ##
 ##  File Names
@@ -968,7 +1003,7 @@ sub load_directory {
         my @old_dir_vars;
         foreach (@dir_vars) {
             push @old_dir_vars, $V{$_};
-            $V{$_} .= "/$dir";
+            $V{$_} = normalize_filename($V{$_}, $dir);
         }
 
         # Load file. IN has been updated at this place.
