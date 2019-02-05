@@ -481,7 +481,7 @@ sub _rule_get {
 #   generate_rebuild_rule()
 # The rule will automatically rebuild the Makefile if any input file changed.
 sub generate_rebuild_rule {
-    my $mf = normalize_filename("$V{OUT}/$V{OUTFILE}");
+    my $mf = normalize_filename(get_variable('OUTFILE'));
     add_variable('PERL', $^X);
     generate($mf, [@input_files, $0],
              join(' ',
@@ -602,7 +602,7 @@ sub output_makefile {
     verify();
 
     # Write it
-    my $mf = "$V{OUT}/$outfile";
+    my $mf = $outfile;
     open MF, '>', "$mf.new" or die "$mf.new: $!\n";
 
     foreach (sort {$rules{$b}{pri} <=> $rules{$a}{pri} || $a cmp $b} keys %rules) {
@@ -647,7 +647,7 @@ sub output_ninja_file {
     my $outfile = add_variable(OUTFILE => 'build.ninja');
     verify();
 
-    my $nf = "$V{OUT}/$outfile";
+    my $nf = $outfile;
     open NF, '>', "$nf.new" or die "$nf.new: $!\n";
 
     # Boilerplate
@@ -699,7 +699,7 @@ sub output_script_file {
 
     verify();
 
-    my $sf = "$V{OUT}/$outfile";
+    my $sf = $outfile;
     open SF, '>', "$sf.new" or die "$sf.new: $!\n";
     print SF "#\n";
     print SF "#  Build script for ", join(' ', @todo), "\n";
