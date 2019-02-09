@@ -5,10 +5,9 @@ suffix=0
 for i in t_*.sh; do
     # Create work directory
     workdir=/tmp/t$$.$suffix
-    if ! mkdir "$workdir"; then
-        echo "Unable to create work directory, abort." >&2
-        exit 1
-    fi
+    while ! mkdir "$workdir"; do
+        suffix=$((suffix + 1))
+    done
 
     # Run test
     printf "%s..." "$i"

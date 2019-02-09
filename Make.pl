@@ -494,9 +494,13 @@ sub generate_rebuild_rule {
     # Add a blank 'foo :' rule for each input file (same as 'gcc -MP' would do).
     # This way, a rebuild will work properly if an include file has been moved.
     # Rules must be marked precious so generate_clean_rule() will not delete them.
+    # We need to add these rules by hand, because generate() would helpfully try
+    # to create the containing directories, causing source directories to be littered
+    # with '.mark' files.
     foreach (@input_files, $0) {
-        generate($_);
-        rule_set_precious($_);
+        if (!$rules{$_}) {
+            $rules{$_} = { in => [], out => [$_], precious => 1, code => [], pri => 0 };
+        }
     }
 }
 

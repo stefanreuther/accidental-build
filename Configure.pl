@@ -317,6 +317,7 @@ sub find_directory {
     }
 
     # Postprocess
+    # FIXME: should be able to report "not found"
     if ($dir eq '' || (@files && !file_exists_at_path($dir, @files))) {
         die "Error: please specify correct directory for $name\n";
     }

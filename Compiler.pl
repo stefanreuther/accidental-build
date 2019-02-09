@@ -98,6 +98,7 @@ sub compile_find_combined_language {
     my $pri = 0;
     foreach (@_) {
         my $this_language = $file_languages{$_};
+
         if (defined($this_language) && $compilers{$this_language} && $compilers{$this_language}{link}) {
             if ($compilers{$this_language}{pri} > $pri) {
                 # New highest-priority language
@@ -284,8 +285,8 @@ sub compile_executable {
     my @objs = map {compile_file($_, $opts)} to_list($objs);
     my @libs = rule_flatten_aliases(to_list($libs));
 
-    my $combined_language = compile_find_combined_language(@objs, @libs);
-    if ($compilers{$combined_language} && $compilers{$combined_language}{link}) {
+    my $combined_language = compile_find_combined_language($exe, @objs, @libs);
+    if (defined($combined_language) && $compilers{$combined_language} && $compilers{$combined_language}{link}) {
         # Language-specific linker
         $compilers{$combined_language}{link}($out, \@objs, \@libs, $opts);
     } else {
