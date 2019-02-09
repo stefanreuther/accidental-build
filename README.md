@@ -59,7 +59,7 @@ could use this `Rules.pl`:
     }
 
     # Link everything into a program
-    generate("$V{OUT}/prog", 'gcc -o $@ '.join(' ', @o));
+    generate("$V{OUT}/prog", [@o], 'gcc -o $@ '.join(' ', @o));
 
 This program also demonstrates the use of `$<` and `$@` to interpolate
 the name of input and output files into a command line.
@@ -78,7 +78,7 @@ command line:
 
 This will allow users to accept a command line such as
 
-    perl /path/to/Make.pl IN=/path/to/source CXXFLAGS=gcc-8.1.0
+    perl /path/to/Make.pl IN=/path/to/source CXX=gcc-8.1.0
 
 to change the compilation command.
 
@@ -143,6 +143,15 @@ configuration and compilation. Use those by calling a command such as
 
 in your `Rules.pl`.
 
+`Make.pl show-vars` will show a list of all variables used in
+`Rules.pl` to give you hints what can be configured.
+
+`Make.pl check-pristine` will check whether your rules try to generate
+a file that already exists. This usually means you have a mistake with
+path names, or you're trying an in-source build which the build rules
+don't support.
+
+
 
 
 History, or: why?
@@ -163,8 +172,7 @@ file), and asks for a generator:
     }
 
 It turns out that once we have a representation of Makefile rules in
-memory, it is really simple to add things like auto-creation of output
-directories, rebuild on rule change...
+memory, it is really simple to add things like rebuild on rule change...
 
     foreach (sort keys %rule) {
         my $name_hash = md5_hex($_);
@@ -174,9 +182,12 @@ directories, rebuild on rule change...
         $rule{$hash_file} = { code =>["rm -f ".$name_hash."_*", "touch $hash_file"] };
     }
 
-...or a "make clean" rule
+...a "make clean" rule
 
     $rule{clean} = { code=>[map {"rm -f $_"} sort keys %rule] }
+
+...or just auto-creation of output directories and validation of the
+rule dependencies.
 
 Compiling C++ code is just a matter of different, simple rules. And
 since this is Perl, we can use all Perl control structures and

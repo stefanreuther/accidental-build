@@ -93,6 +93,9 @@ sub setup_commands {
     $commands{"show-vars"} = sub {
         show_variables();
     };
+    $commands{"check-pristine"} = sub {
+        verify_pristine();
+    };
 }
 
 
@@ -1116,4 +1119,20 @@ sub verify {
             }
         }
     }
+}
+
+sub verify_pristine {
+    my $exist = 0;
+    my $not = 0;
+    foreach (sort keys %rules) {
+        if (!$rules{$_}{phony}) {
+            if (-e $_) {
+                print STDERR "$_: warning: file exists although it should be generated.\n";
+                ++$exist;
+            } else {
+                ++$not;
+            }
+        }
+    }
+    printf "%d files exist, %d files do not exist of %d generated.\n", $exist, $not, $exist+$not;
 }
