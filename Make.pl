@@ -1,7 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
 use Digest::MD5 qw(md5_hex);
-use Cwd qw(abs_path);
 
 # Rules
 #    in : [str]          input files
@@ -1113,7 +1112,7 @@ sub load_file {
 }
 
 sub load_module {
-    my @path = ($V{IN}, (split_filename(abs_path($0)))[0]);
+    my @path = ($V{IN}, _find_root_path());
     foreach my $mod (@_) {
         my $ok = 0;
         foreach my $dir (@path) {
@@ -1187,4 +1186,16 @@ sub verify_pristine {
         }
     }
     printf "%d files exist, %d files do not exist of %d generated.\n", $exist, $not, $exist+$not;
+}
+
+sub _find_root_path {
+    my $path = $0;
+    foreach (1 .. 10) {
+        my $base = (split_filename($path))[0];
+        if (-l $path) {
+            $path = normalize_filename($base, readlink($path));
+        } else {
+            return $base;
+        }
+    }
 }
