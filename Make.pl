@@ -466,11 +466,14 @@ sub rule_rebuild_directory {
     my $hash_file = "$V{TMP}/.hash/$n1/${n2}_${child_hash}";
     generate($hash_file, [],
              "\@$rm $V{TMP}/.hash/$n1/${n2}_*",
-             "\@$rm -r $dir",
+             "\@if test -d $dir; then $rm -r $dir; fi",
              "\@$touch $hash_file");
     push_unique($rules{$mark}{in}, $hash_file);
     rule_set_priority($hash_file, -100);
     rule_add_comment($hash_file, "Rule change marker for $dir");
+
+    generate('rule_check', $hash_file);
+    rule_set_phony('rule_check');
 }
 
 
