@@ -581,6 +581,9 @@ sub generate_rule_hashes {
             unless $rules{$_}{dir} || $rules{$_}{phony};
     }
 
+    generate('rule_check', []);
+    rule_set_phony('rule_check');
+
     foreach (sort keys %hashes) {
         my $nameHash = md5_hex($_);
         my $codeHash = $hashes{$_};
@@ -593,6 +596,8 @@ sub generate_rule_hashes {
         push_unique($rules{$_}{in}, $hashFile);
         rule_set_priority($hashFile, -100);
         rule_add_comment($hashFile, "Rule change marker for $_");
+
+        generate('rule_check', $hashFile);
     }
 }
 
