@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 use strict;
 use Digest::MD5 qw(md5_hex);
+use Cwd qw(abs_path);
 
 # Rules
 #    in : [str]          input files
@@ -31,8 +32,10 @@ my %V = (
     INFILE => 'Rules.pl'
 );
 my %user_vars;
+my %make_vars;
 
 add_directory_variable(qw(OUT IN TMP));
+add_make_variable(qw(DESTDIR));
 setup_commands();
 
 # Parse parameters
@@ -61,6 +64,7 @@ foreach (@ARGV) {
         push @args, $_;
     }
 }
+add_destination_variable(prefix => '/usr/local');
 generate('all', []);
 rule_set_phony('all');
 rule_set_priority('all', 100);
@@ -610,7 +614,13 @@ sub output_makefile {
 
     # Write it
     my $mf = $outfile;
+    print "\tCreating $mf...\n";
     open MF, '>', "$mf.new" or die "$mf.new: $!\n";
+
+    foreach (sort keys %make_vars) {
+        print MF "$_ = $make_vars{$_}\n";
+    }
+    print MF "\n";
 
     foreach (sort {$rules{$b}{pri} <=> $rules{$a}{pri} || $a cmp $b} keys %rules) {
         if (!$rules{$_}{did}) {
@@ -655,6 +665,7 @@ sub output_ninja_file {
     verify();
 
     my $nf = $outfile;
+    print "\tCreating $nf...\n";
     open NF, '>', "$nf.new" or die "$nf.new: $!\n";
 
     # Boilerplate
@@ -943,6 +954,30 @@ sub add_directory_variable {
     push_unique(\@dir_vars, @_);
 }
 
+sub add_make_variable {
+    foreach my $k (@_) {
+        if (!exists $make_vars{$k}) {
+            $make_vars{$k} = add_variable($k, '');
+            $V{$k} = '$('.$k.')';
+        }
+    }
+}
+
+sub add_destination_variable {
+    # FIXME: this function/concept is preliminary and may change
+    # Set variable defaults
+    add_variable(@_);
+
+    # Prepend DESTDIR to everyone
+    my $result;
+    while (@_) {
+        my $k = shift; shift;
+        $V{$k} = '$(DESTDIR)'.$V{$k};
+        $result = $V{$k};
+    }
+    $result;
+}
+
 sub add_variable {
     my $result;
     while (@_) {
@@ -958,7 +993,7 @@ sub add_variable {
 
 sub set_user_variable {
     my ($k, $v) = @_;
-    $V{$k} = $v;
+    set_variable($k, $v);
     $user_vars{$k} = $v;
 }
 
@@ -966,17 +1001,22 @@ sub set_variable {
     while (@_) {
         my $k = shift;
         my $v = shift;
-        $V{$k} = $v;
+        if (exists $make_vars{$k}) {
+            $make_vars{$k} = $v;
+        } else {
+            $V{$k} = $v;
+        }
     }
 }
 
 sub add_to_variable {
     my $k = shift;
     foreach (@_) {
-        if (!exists $V{$k} || $V{$k} eq '') {
-            $V{$k} = $_;
+        my $hash = (exists $make_vars{$k} ? \%make_vars : \%V);
+        if (!exists $hash->{$k} || $hash->{$k} eq '') {
+            $hash->{$k} = $_;
         } else {
-            $V{$k} .= ' ' . $_;
+            $hash->{$k} .= ' ' . $_;
         }
     }
 }
@@ -999,8 +1039,11 @@ sub show_variables {
             if ($user_vars{$k} eq $V{$k}) {
                 print "\t# user-set\n";
             } else {
-                print "\t# user-set: $user_vars{$k})\n";
+                print "\t# user-set: $user_vars{$k}\n";
             }
+        }
+        if (exists $make_vars{$k}) {
+            print "\t# make: $make_vars{$k}\n";
         }
         if (grep {$_ eq $k} @dir_vars) {
             print "\t# directory\n";
@@ -1062,9 +1105,10 @@ sub load_file {
 }
 
 sub load_module {
+    my @path = ($V{IN}, (split_filename(abs_path($0)))[0]);
     foreach my $mod (@_) {
         my $ok = 0;
-        foreach my $dir ($V{IN}, (split_filename($0))[0]) {
+        foreach my $dir (@path) {
             my $mf = normalize_filename($dir, $mod);
             if (-e "$mf") {
                 load_file("$mf");
