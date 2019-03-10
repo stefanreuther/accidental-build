@@ -190,6 +190,70 @@ sub find_system_libraries {
     log_info("Using system libraries: $V{LIBS}");
 }
 
+# Find optional program.
+#   find_program($key, $program, @opts)
+# First parameter: variable to set, typically something like WITH_FOO.
+# Second parameter: name of program.
+# Options are a list of key=>value pairs:
+#    var            variable where to find/place name
+#    path           extra paths to search
+#    env            extra environment variable to search
+#
+# Tries to locate the program by looking for an appropriately named executable.
+# If --with-foo (WITH_FOO=1) is given, it is an error if it cannot be found,
+# if --without-foo (WITH_FOO=0) is given, it is not used.
+#
+# The program is searched along the PATH environment variable, the given paths,
+# or the given environment variable. The program is NOT attempted to be executed.
+#
+# If 'var' is given, the user can claim the program to be available under a given
+# name by specifying this variable, and it will be used with no further checks.
+# If the search succeeds, the variable is updated with the resulting path.
+sub find_program {
+    my $key = shift;
+    my $program = shift;
+    my %opts = @_;
+
+    add_variable($key => '');
+    if ($V{$key} eq '' || $V{$key}) {
+        # auto or explicitly enabled
+        my $ok = 0;
+        my $path;
+        if (exists $opts{var} && exists $V{$opts{var}} && $V{$opts{var}} ne '') {
+            # user provided a name already (or we saw this in a previous run), assume it works
+            $path = $V{$opts{var}};
+            $ok = 1;
+        } else {
+            # no directory given, perform path search
+            my @path;
+            push @path, split /:/, $opts{path}      if exists $opts{path};
+            push @path, split /:/, $ENV{$opts{env}} if exists $opts{env} && exists $ENV{$opts{env}};
+            push @path, split /:/, $ENV{PATH}       if exists $ENV{PATH};
+            foreach my $p (@path) {
+                my $f = normalize_filename($p, $program);
+                if (-f $f && -x $f) {
+                    $path = $f;
+                    $ok = 1;
+                    last;
+                }
+            }
+        }
+
+        if (!$ok && $V{$key}) {
+            die "Error: unable to find program '$program' although explicitly requested; change '$key='";
+        }
+        $V{$key} = $ok;
+        if ($ok && exists $opts{var}) {
+            set_variable($opts{var}, $path);
+        }
+    }
+
+    if (!$V{$key}) {
+        log_info("Disabled $program.");
+    }
+    $V{$key};
+}
+
 # Find library.
 #   find_library($key, @opts)
 # First parameter: variable to set, typically something like WITH_FOO
@@ -226,7 +290,8 @@ sub find_library {
     add_variable($key => '',
                  LIBS => '',
                  CXXFLAGS => '');
-    my $use_pkgconfig = add_variable(USE_PKGCONFIG => 1);
+
+    my $use_pkgconfig = find_program('USE_PKGCONFIG', 'pkg-config', var => 'PKGCONFIG');
 
     if ($V{$key} eq '' || $V{$key}) {
         # auto or explicitly enabled
@@ -246,10 +311,10 @@ sub find_library {
                 }
             }
         }
-        if (!$ok && $pkg ne '' && $use_pkgconfig && try_exec("pkg-config --exists $pkg")) {
+        if (!$ok && $pkg ne '' && $use_pkgconfig && try_exec("$V{PKGCONFIG} --exists $pkg")) {
             # pkg-config claims it's there
-            my $libs = try_exec_output("pkg-config --libs $pkg");
-            my $incs = try_exec_output("pkg-config --cflags-only-I $pkg");
+            my $libs = try_exec_output("$V{PKGCONFIG} --libs $pkg");
+            my $incs = try_exec_output("$V{PKGCONFIG} --cflags-only-I $pkg");
             my $flags = { LIBS => "$V{LIBS} $libs", CXXFLAGS => "$V{CXXFLAGS} $incs" };
             if ($prog ne '') {
                 # We have a test program; verify that pkg-config output is correct
