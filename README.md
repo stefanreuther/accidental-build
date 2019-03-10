@@ -226,4 +226,4 @@ dependency files.
 
 The Makefile will have a rule to re-create itself; this will obviously
 only work if the Make utility supports the feature of re-creating and
-re-loading a Makefile.
+re-loading a Makefile. Use `BS_REBUILD=0` to disable.

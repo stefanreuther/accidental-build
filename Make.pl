@@ -18,7 +18,7 @@ my %rules;
 my @dir_vars;
 
 # List of input files
-my @input_files;
+my %input_files;
 
 # Commands
 my %commands;
@@ -294,7 +294,7 @@ sub generate_anonymous {
 sub generate_copy {
     my ($out, $in) = @_;
     my $cp = add_variable('CP', 'cp');
-    generate($out, $in, "\@$cp $in $out");
+    generate($out, $in, "\@$cp \$< \$\@");
 }
 
 # Copy files to a directory.
@@ -491,8 +491,9 @@ sub _rule_get {
 # The rule will automatically rebuild the Makefile if any input file changed.
 sub generate_rebuild_rule {
     my $mf = normalize_filename(get_variable('OUTFILE'));
+    my @sources = (sort keys %input_files, $0);
     add_variable('PERL', $^X);
-    generate($mf, [@input_files, $0],
+    generate($mf, [@sources],
              join(' ',
                   "$V{PERL} $0 makefile",
                   map {$_.'='.quotemeta($user_vars{$_})} sort keys %user_vars));
@@ -506,7 +507,7 @@ sub generate_rebuild_rule {
     # We need to add these rules by hand, because generate() would helpfully try
     # to create the containing directories, causing source directories to be littered
     # with '.mark' files.
-    foreach (@input_files, $0) {
+    foreach (@sources) {
         if (!$rules{$_}) {
             $rules{$_} = { in => [], out => [$_], precious => 1, code => [], pri => 0 };
         }
@@ -612,8 +613,12 @@ sub generate_rule_hashes {
 sub output_makefile {
     # Implicit makefile stuff
     my $outfile = add_variable(OUTFILE => 'Makefile');
-    generate_rule_hashes();    # first, because we don't want a rule hash for the next parts
-    generate_rebuild_rule();   # needs $V{OUTFILE}
+    my $rebuild = add_variable(BS_REBUILD => 1);
+    my $rule_check = add_variable(BS_RULE_CHECK => 1);
+    generate_rule_hashes()     # first, because we don't want a rule hash for the next parts
+        if $rule_check;
+    generate_rebuild_rule()    # needs $V{OUTFILE}
+        if $rebuild;
     generate_clean_rule();
     generate_phony_rule();     # last, to pick up phony targets created above
 
@@ -730,7 +735,7 @@ sub output_script_file {
     print SF "#  Build script for ", join(' ', @todo), "\n";
     print SF "#\n";
     print SF "#  Input files:\n";
-    print SF map{"#   $_\n"} @input_files;
+    print SF map{"#   $_\n"} sort keys %input_files;
     print SF "#\n\n\n";
 
     while (@todo) {
@@ -806,8 +811,7 @@ sub file_update {
 
 sub get_directory_content {
     my $dir = normalize_filename(shift);
-    push @input_files, $dir
-        unless grep {$_ eq $dir} @input_files;
+    add_input_file($dir);
 
     my @result;
     opendir my $dh, $dir or die "$dir: $!";
@@ -1064,6 +1068,18 @@ sub _sanitize_variable_name {
     uc($n);
 }
 
+sub add_input_file {
+    foreach (@_) {
+        $input_files{normalize_filename($_)} = 1;
+    }
+}
+
+sub remove_input_file {
+    foreach (@_) {
+        delete $input_files{normalize_filename($_)};
+    }
+}
+
 ##
 ##  Directory handling
 ##
@@ -1101,7 +1117,7 @@ sub load_file {
         close FILE;
 
         # Remember as input file
-        push_unique(\@input_files, $mf);
+        add_input_file($mf);
 
         # Eval. Use eval, not do, because that evaluates the code in our scope.
         print "\tExecuting $mf...\n";
@@ -1145,7 +1161,7 @@ sub load_variables {
             }
         }
         close FILE;
-        push_unique(\@input_files, $file);
+        add_input_file($file);
     }
     $result;
 }
