@@ -101,6 +101,20 @@ sub setup_commands {
     };
 }
 
+##
+##  Logging
+##
+
+sub log_info {
+    print "\t", @_, "\n";
+}
+
+sub log_trace {
+    add_variable('VERBOSE', '');
+    if ($V{VERBOSE}) {
+        print @_, "\n";
+    }
+}
 
 ##
 ##  General Infrastructure

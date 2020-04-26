@@ -4,21 +4,6 @@
 
 use Digest::MD5 qw(md5_hex);
 
-##
-##  Logging
-##
-
-sub log_info {
-    print "\t", @_, "\n";
-}
-
-sub log_trace {
-    add_variable('VERBOSE', '');
-    if ($V{VERBOSE}) {
-        print @_, "\n";
-    }
-}
-
 
 ##
 ##  Utilities
