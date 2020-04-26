@@ -110,8 +110,8 @@ changes, that file is rebuilt.
 You need not manually create subdirectories, this happens
 automatically.
 
-The Makefile will have a `make all` rule. You need to add dependencies
-to that rule.
+The Makefile will have a default `make all` rule. Add whatever you
+want to be built by default to it (`generate(all => "...")`).
 
 If a rule generates a `.d` file, that file will automatically be
 included into the Makefile using the `-include` command. By having
@@ -128,8 +128,8 @@ Invoke it as
     perl /path/to/Make.pl IN=/path/to/source ninjafile
     ninja
 
-to generate a `build.ninja` file instead of a Makefile. This support
-is incomplete and probably not ideal yet.
+to generate a `build.ninja` file instead of a Makefile. This should
+work in the same way as with Makefiles.
 
 
 ### More
@@ -150,7 +150,6 @@ in your `Rules.pl`.
 a file that already exists. This usually means you have a mistake with
 path names, or you're trying an in-source build which the build rules
 don't support.
-
 
 
 
@@ -210,6 +209,10 @@ The above "asset" project currently clocks in at 365 output files and
 that there's nothing more to be done, `make -r` needs just 17 ms on my
 machine (ninja: 9 ms). For a C++ project with ~900 source files we're
 at 250 ms vs. 50 ms (vs. 16 ms).
+
+Implicit rule change detection or directory creation will look at
+additional files. ninja solves this internally, which is an advantage
+it has over Make that we cannot reproduce in a Makefile.
 
 
 
