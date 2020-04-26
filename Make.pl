@@ -504,12 +504,13 @@ sub _rule_get {
 #   generate_rebuild_rule()
 # The rule will automatically rebuild the Makefile if any input file changed.
 sub generate_rebuild_rule {
+    my $cmd = shift || 'makefile';
     my $mf = normalize_filename(get_variable('OUTFILE'));
     my @sources = (sort keys %input_files, $0);
     add_variable('PERL', $^X);
     generate($mf, [@sources],
              join(' ',
-                  "$V{PERL} $0 makefile",
+                  "$V{PERL} $0 $cmd",
                   map {$_.'='.quotemeta($user_vars{$_})} sort keys %user_vars));
     rule_add_comment($mf, 'Automatically regenerate build file');
     rule_add_info($mf, "Rebuilding $mf");
@@ -687,7 +688,12 @@ sub output_makefile {
 # Generate build.ninja
 sub output_ninja_file {
     # No implicit stuff needed. Ninja has rule change detection built in, as well as 'clean'.
-    my $outfile = add_variable(OUTFILE => 'build.ninja');
+    my $outfile = normalize_filename(add_variable(OUTFILE => 'build.ninja'));
+    my $rebuild = add_variable(BS_REBUILD => 1);
+
+    generate_rebuild_rule('ninjafile')    # needs $V{OUTFILE}
+        if $rebuild;
+
     verify();
 
     my $nf = $outfile;
@@ -722,6 +728,8 @@ sub output_ninja_file {
                     if exists $rules{$_}{info};
                 print NF "  depfile = ", join(' ', @dep), "\n"
                     if @dep;
+                print NF "  generator = 1\n"
+                    if $rebuild && grep {$outfile eq $_} @{$rules{$_}{out}};
                 print NF "\n";
             }
         }
