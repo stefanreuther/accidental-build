@@ -343,6 +343,7 @@ sub find_library {
 #    name           user-friendly name
 #    files          reference to list of file names that need to be in the directory
 #    guess          reference to list of guesses for the directory name
+#    allow_missing  nonzero to allow the directory to be missing
 #
 # If files are given, they need to be present in a directory to be acceptable.
 # If guesses are given, they are tried (check files, or just presence of directory)
@@ -367,12 +368,17 @@ sub find_directory {
     }
 
     # Postprocess
-    # FIXME: should be able to report "not found"
-    if ($dir eq '' || (@files && !file_exists_at_path($dir, @files))) {
-        die "Error: please specify correct directory for $name\n";
+    if ($dir eq '' && $opts{allow_missing}) {
+        # It's missing and that's ok
+        log_info("Leaving $key unset.");
+    } else {
+        # Should be there, validate it
+        if ($dir eq '' || (@files && !file_exists_at_path($dir, @files))) {
+            die "Error: please specify correct directory for $name\n";
+        }
+        $dir = normalize_filename($dir);
+        log_info("Using $key: $dir");
     }
-    $dir = normalize_filename($dir);
     set_variable($key, $dir);
-    log_info("Using $key: $dir");
     $dir;
 }
