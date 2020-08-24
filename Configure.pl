@@ -274,6 +274,8 @@ sub find_library {
     # Set up output variables
     add_variable($key => '',
                  LIBS => '',
+                 LDFLAGS => '',
+                 CFLAGS => '',
                  CXXFLAGS => '');
 
     my $use_pkgconfig = find_program('USE_PKGCONFIG', 'pkg-config', var => 'PKGCONFIG');
@@ -284,12 +286,12 @@ sub find_library {
         if ($dir ne '' && $prog ne '' && $libs ne '') {
             # Probe provided directory names
             foreach my $d (split /\s+/, $dir) {
-                if (-d "$d/lib" && -d "$d/include" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d/lib", CXXFLAGS => "$V{CXXFLAGS} -I$d/include" }, 1)) {
+                if (-d "$d/lib" && -d "$d/include" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d/lib", CFLAGS => "$V{CFLAGS} -I$d/include", CXXFLAGS => "$V{CXXFLAGS} -I$d/include" }, 1)) {
                     log_info("Enabled $name (standard)");
                     $ok = 1;
                     last;
                 }
-                if (-d "$d" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d", CXXFLAGS => "$V{CXXFLAGS} -I$d" }, 1)) {
+                if (-d "$d" && try_link($prog, { LIBS => "$V{LIBS} $libs", LDFLAGS => "$V{LDFLAGS} -L$d", CFLAGS => "$V{CFLAGS} -I$d", CXXFLAGS => "$V{CXXFLAGS} -I$d" }, 1)) {
                     log_info("Enabled $name (flat)");
                     $ok = 1;
                     last;
@@ -300,7 +302,7 @@ sub find_library {
             # pkg-config claims it's there
             my $libs = try_exec_output("$V{PKGCONFIG} --libs $pkg");
             my $incs = try_exec_output("$V{PKGCONFIG} --cflags-only-I $pkg");
-            my $flags = { LIBS => "$V{LIBS} $libs", CXXFLAGS => "$V{CXXFLAGS} $incs" };
+            my $flags = { LIBS => "$V{LIBS} $libs", CFLAGS => "$V{CFLAGS} $incs", CXXFLAGS => "$V{CXXFLAGS} $incs" };
             if ($prog ne '') {
                 # We have a test program; verify that pkg-config output is correct
                 if (try_link($prog, $flags, 1)) {
