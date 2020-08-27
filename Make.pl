@@ -511,7 +511,7 @@ sub generate_rebuild_rule {
     generate($mf, [@sources],
              join(' ',
                   "$V{PERL} $0 $cmd",
-                  map {$_.'='.quotemeta($user_vars{$_})} sort keys %user_vars));
+                  map {$_.'='.quote_parameter($user_vars{$_})} sort keys %user_vars));
     rule_add_comment($mf, 'Automatically regenerate build file');
     rule_add_info($mf, "Rebuilding $mf");
     rule_set_precious($mf);
@@ -977,6 +977,16 @@ sub join_commands {
         }
     }
     join('', @code);
+}
+
+sub quote_parameter {
+    my $x = shift;
+    if ($x !~ /[\$\\\"]/) {
+	$x = "\"$x\"";
+    } else {
+	$x = quotemeta($x);
+    }
+    $x;
 }
 
 ##
