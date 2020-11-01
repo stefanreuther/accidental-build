@@ -1015,7 +1015,7 @@ sub add_destination_variable {
     my $result;
     while (@_) {
         my $k = shift; shift;
-        $V{$k} = '$(DESTDIR)'.$V{$k};
+        $V{$k} = '${DESTDIR}'.$V{$k};
         $result = $V{$k};
     }
     $result;
