@@ -680,6 +680,10 @@ sub output_makefile {
             print MF "\n";
         }
     }
+
+    # Special magic to disable GNU Make's implicit rules; improves incremental build time
+    print MF "\n# Disable implicit rules\nMAKEFLAGS += r\n";
+
     close MF;
     rename "$mf.new", $mf
         or die "$mf: $!\n";

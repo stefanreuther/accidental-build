@@ -202,7 +202,8 @@ Efficiency
 The generated Makefile does not rely on any built-in magic (i.e.
 built-in pattern rules) of the Make program. You can disable Make's
 builtin rules (GNU make: `-r`) to reduce the number of files it looks
-at (this is an advantage ninja claims to have over Make).
+at (this is an advantage ninja claims to have over Make). Option `-r`
+is now passed automatically by means of `MAKEFLAGS`.
 
 The above "asset" project currently clocks in at 365 output files and
 2465 temporary files. After a build, GNU make needs 50 ms to determine
