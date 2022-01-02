@@ -35,17 +35,19 @@ sub compile_default {
     my ($file, $compiler_var, $flags_var, $opts) = @_;
 
     add_variable('OBJ_SUFFIX' => '.o');
+    add_variable('DEPFLAGS' => '-MMD -MP');
 
     my $compiler = get_variable      ($compiler_var, $opts, $opts->{$file});                # FIXME: caller should do the merging
     my $flags    = get_variable_merge($flags_var,    $opts, $opts->{$file});
     my $obj_ext  = get_variable      ('OBJ_SUFFIX',  $opts, $opts->{$file});
+    my $depflags = get_variable_merge('DEPFLAGS',    $opts, $opts->{$file});
 
     my ($dir, $stem, $ext) = split_filename($file);
     my $uniq = '';
     while (1) {
         my $base = make_temp_filename("$dir$stem$uniq", $opts, $opts->{$file});
         my $o = $base.$obj_ext;
-        if (generate_unique(["$base.d", $o], $file, "$compiler $flags -c $file -o $o -MMD -MP")) {
+        if (generate_unique(["$base.d", $o], $file, "$compiler $flags -c $file -o $o $depflags")) {
             rule_add_info($o, "Compiling $file");
             generate_unique("$base.s", $file, "$compiler $flags -S $file -o \$@");
             return ($o);
